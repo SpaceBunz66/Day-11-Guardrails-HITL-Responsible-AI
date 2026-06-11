@@ -27,37 +27,49 @@ from core.config import ALLOWED_TOPICS, BLOCKED_TOPICS
 # - "pretend you are"
 # - "act as (a |an )?unrestricted"
 # ============================================================
+import re
 
-def detect_injection(user_input: str) -> bool:
-    """Detect prompt injection patterns in user input.
+INJECTION_PATTERNS = [
+    r"ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|rules|prompts)",
+    r"disregard\s+(all\s+)?(previous|prior|above)\s+(instructions|rules|prompts)",
+    r"forget\s+(all\s+)?(previous|prior|above)\s+(instructions|rules|prompts)",
+    r"reveal\s+(your\s+)?(system|developer|hidden|internal)\s+(prompt|instructions|rules)",
+    r"(show|print|output|display|translate|summarize)\s+(your\s+)?(system|developer|hidden|internal)\s+(prompt|instructions|rules)",
+    r"(admin\s*password|api\s*key|database\s*(connection|string|url)|secret|credential|token)",
+    r"you\s+are\s+now\s+(dan|developer\s+mode|jailbreak)",
+    r"act\s+as\s+(dan|a\s+hacker|an\s+admin|system\s+administrator)",
+    r"bypass\s+(safety|security|guardrails|policy|rules)",
+    r"override\s+(safety|security|guardrails|policy|rules|instructions)",
+    r"base64|rot13|decode|encoded|obfuscation",
+    r"side[-\s]?channel",
+    r"fill\s+in\s+the\s+(blank|missing|template)",
+    r"return\s+only\s+(json|yaml|xml)",
+    r"bỏ\s+qua\s+(mọi|tất\s+cả)?\s*(hướng\s+dẫn|quy\s+tắc)",
+    r"tiết\s+lộ\s+(system\s+prompt|prompt\s+hệ\s+thống|mật\s+khẩu|api\s*key)",
+]
 
-    Args:
-        user_input: The user's message
-
-    Returns:
-        True if injection detected, False otherwise
+def detect_prompt_injection(user_input: str):
     """
-    INJECTION_PATTERNS = [
-        # TODO: Add at least 5 regex patterns
-        # Example:
-        # r"ignore (all )?(previous|above) instructions",
-    ]
+    Detect common prompt injection / jailbreak / secret extraction attempts.
+    Returns: (is_blocked: bool, reason: str)
+    """
+    if not user_input or not user_input.strip():
+        return True, "Empty input is not allowed."
+
+    text = user_input.lower()
 
     for pattern in INJECTION_PATTERNS:
-        if re.search(pattern, user_input, re.IGNORECASE):
-            return True
-    return False
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            return True, f"Prompt injection pattern detected: {pattern}"
+
+    return False, "Input passed prompt injection check."
 
 
-# ============================================================
-# TODO 4: Implement topic_filter()
-#
-# Check if user_input belongs to allowed topics.
-# The VinBank agent should only answer about: banking, account,
-# transaction, loan, interest rate, savings, credit card.
-#
-# Return True if input should be BLOCKED (off-topic or blocked topic).
-# ============================================================
+def detect_injection(user_input: str) -> bool:
+    """Return True if prompt injection is detected."""
+    blocked, _ = detect_prompt_injection(user_input)
+    return blocked
+
 
 def topic_filter(user_input: str) -> bool:
     """Check if input is off-topic or contains blocked topics.
@@ -68,26 +80,21 @@ def topic_filter(user_input: str) -> bool:
     Returns:
         True if input should be BLOCKED (off-topic or blocked topic)
     """
+    if not user_input:
+        return True
+
     input_lower = user_input.lower()
 
-    # TODO: Implement logic:
-    # 1. If input contains any blocked topic -> return True
-    # 2. If input doesn't contain any allowed topic -> return True
-    # 3. Otherwise -> return False (allow)
+    for topic in BLOCKED_TOPICS:
+        if topic in input_lower:
+            return True
 
-    pass  # Replace with your implementation
+    for topic in ALLOWED_TOPICS:
+        if topic in input_lower:
+            return False
 
+    return True
 
-# ============================================================
-# TODO 5: Implement InputGuardrailPlugin
-#
-# This plugin blocks bad input BEFORE it reaches the LLM.
-# Fill in the on_user_message_callback method.
-#
-# NOTE: The callback uses keyword-only arguments (after *).
-#   - user_message is types.Content (not str)
-#   - Return types.Content to block, or None to pass through
-# ============================================================
 
 class InputGuardrailPlugin(base_plugin.BasePlugin):
     """Plugin that blocks bad input before it reaches the LLM."""
@@ -128,14 +135,20 @@ class InputGuardrailPlugin(base_plugin.BasePlugin):
         self.total_count += 1
         text = self._extract_text(user_message)
 
-        # TODO: Implement logic:
-        # 1. Call detect_injection(text)
-        #    - If True: increment blocked_count, return self._block_response("...")
-        # 2. Call topic_filter(text)
-        #    - If True: increment blocked_count, return self._block_response("...")
-        # 3. If both are False: return None (let message through)
+        injection_detected, reason = detect_prompt_injection(text)
+        if injection_detected:
+            self.blocked_count += 1
+            return self._block_response(
+                f"Your request was blocked by the input guardrail: {reason}"
+            )
 
-        pass  # Replace with your implementation
+        if topic_filter(text):
+            self.blocked_count += 1
+            return self._block_response(
+                "Your request was blocked because it is outside supported banking topics."
+            )
+
+        return None
 
 
 # ============================================================

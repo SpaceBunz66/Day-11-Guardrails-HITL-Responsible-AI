@@ -128,7 +128,18 @@ async def main(parts=None):
     Args:
         parts: List of part numbers to run, or None for all
     """
-    setup_api_key()
+    import os
+    from pathlib import Path
+    from dotenv import load_dotenv
+    from getpass import getpass
+
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
+    api_key = (
+        os.getenv("GOOGLE_API_KEY")
+        or os.getenv("GEMINI_API_KEY")
+        or getpass("Enter Google API Key: ")
+    )
 
     if parts is None:
         parts = [1, 2, 3, 4]
